@@ -1,0 +1,35 @@
+{
+  "name": "dataclean",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DataClean — Operational data automation platform.",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,magenta \"pnpm --filter @dataclean/backend dev\" \"pnpm --filter @dataclean/frontend dev\"",
+    "build": "pnpm --filter @dataclean/backend build && pnpm --filter @dataclean/frontend build",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "prepare": "husky install || true"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.3"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.12.0"
+}

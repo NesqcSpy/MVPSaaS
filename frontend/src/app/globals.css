@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html, body {
+    background-color: #0B1020;
+    color: #F8FAFC;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    background-image:
+      radial-gradient(1200px 600px at 50% -200px, rgba(59,130,246,0.15), transparent 60%),
+      radial-gradient(800px 400px at 100% 0, rgba(139,92,246,0.10), transparent 60%);
+    background-attachment: fixed;
+  }
+  ::selection {
+    background: rgba(59, 130, 246, 0.35);
+  }
+}
+
+@layer components {
+  .card-surface {
+    @apply bg-surface/60 border border-border rounded-xl backdrop-blur-sm shadow-card;
+  }
+  .text-grad {
+    background: linear-gradient(135deg, #F8FAFC 0%, #94A3B8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .text-brand-grad {
+    background: linear-gradient(135deg, #3B82F6 0%, #06B6D4 50%, #8B5CF6 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .ring-grid {
+    background-image: radial-gradient(circle at 1px 1px, rgba(148,163,184,0.08) 1px, transparent 0);
+    background-size: 24px 24px;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148,163,184,0.3) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(148,163,184,0.3);
+    border-radius: 3px;
+  }
+}

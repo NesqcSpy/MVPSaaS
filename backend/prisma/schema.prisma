@@ -1,0 +1,323 @@
+// DataClean — Prisma schema
+// Domain: identity, documents, OCR, extraction, validation, ETL, workflows, integrations, audit.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ──────────────────────────────────────────────────────────────
+// Identity & access
+// ──────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model User {
+  id               String   @id @default(uuid())
+  email            String   @unique
+  passwordHash     String
+  name             String?
+  emailVerifiedAt  DateTime?
+  lastLoginAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  memberships      Membership[]
+  refreshTokens    RefreshToken[]
+  auditLogs        AuditLog[]
+
+  @@index([email])
+  @@index([deletedAt])
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  workspaces  Workspace[]
+  memberships Membership[]
+
+  @@index([deletedAt])
+}
+
+model Workspace {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  slug           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documents      Document[]
+  pipelines      Pipeline[]
+  integrations   Integration[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@index([deletedAt])
+}
+
+model Membership {
+  id             String   @id @default(uuid())
+  userId         String
+  organizationId String
+  role           Role     @default(MEMBER)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  userId      String
+  tokenHash   String   @unique
+  userAgent   String?
+  ipAddress   String?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ──────────────────────────────────────────────────────────────
+// Documents & OCR
+// ──────────────────────────────────────────────────────────────
+
+enum DocumentStatus {
+  PENDING
+  UPLOADED
+  OCR_RUNNING
+  OCR_COMPLETE
+  EXTRACTING
+  EXTRACTED
+  VALIDATING
+  VALIDATED
+  EXPORTING
+  EXPORTED
+  FAILED
+}
+
+enum DocumentKind {
+  INVOICE
+  RECEIPT
+  PURCHASE_ORDER
+  GENERIC
+}
+
+model Document {
+  id            String         @id @default(uuid())
+  workspaceId   String
+  uploaderId    String?
+  filename      String
+  mimeType      String
+  sizeBytes     Int
+  storageKey    String         @unique
+  checksum      String?
+  kind          DocumentKind   @default(GENERIC)
+  status        DocumentStatus @default(PENDING)
+  pageCount     Int?
+  error         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  ocrResult         OCRResult?
+  extractionResult  ExtractionResult?
+  validationResult  ValidationResult?
+  jobs              WorkflowJob[]
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, createdAt])
+  @@index([deletedAt])
+}
+
+model OCRResult {
+  id            String   @id @default(uuid())
+  documentId    String   @unique
+  provider      String
+  rawText       String   @db.Text
+  pages         Json     // [{ page: number, text: string, blocks?: [...] }]
+  confidence    Float?
+  durationMs    Int?
+  createdAt     DateTime @default(now())
+
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model ExtractionResult {
+  id            String   @id @default(uuid())
+  documentId    String   @unique
+  template      String   // invoice | receipt | purchase_order | generic
+  data          Json     // structured fields
+  fieldScores   Json?    // { fieldName: confidence }
+  overallScore  Float?
+  durationMs    Int?
+  createdAt     DateTime @default(now())
+
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+enum ValidationStatus {
+  PASSED
+  PASSED_WITH_WARNINGS
+  FAILED
+}
+
+model ValidationResult {
+  id            String           @id @default(uuid())
+  documentId    String           @unique
+  status        ValidationStatus
+  issues        Json             // [{ field, rule, severity, message }]
+  ruleSetId     String?
+  createdAt     DateTime         @default(now())
+
+  document      Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+// ──────────────────────────────────────────────────────────────
+// Pipelines, workflows, integrations
+// ──────────────────────────────────────────────────────────────
+
+enum PipelineStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+model Pipeline {
+  id            String         @id @default(uuid())
+  workspaceId   String
+  name          String
+  description   String?
+  status        PipelineStatus @default(ACTIVE)
+  definition    Json           // serialized DAG / step list
+  schedule      String?        // cron expression
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  jobs          WorkflowJob[]
+
+  @@index([workspaceId])
+  @@index([status])
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  RETRYING
+  COMPLETED
+  FAILED
+  DEAD_LETTER
+  CANCELLED
+}
+
+model WorkflowJob {
+  id           String     @id @default(uuid())
+  pipelineId   String?
+  documentId   String?
+  workspaceId  String
+  type         String     // ocr | extraction | validation | etl.export | etc.
+  status       JobStatus  @default(QUEUED)
+  attempts     Int        @default(0)
+  maxAttempts  Int        @default(3)
+  payload      Json?
+  result       Json?
+  error        String?
+  correlationId String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  pipeline     Pipeline?  @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
+  document     Document?  @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([pipelineId])
+  @@index([documentId])
+  @@index([correlationId])
+}
+
+enum IntegrationKind {
+  POSTGRES
+  MYSQL
+  MSSQL
+  CSV
+  EXCEL
+  HTTP_API
+  WEBHOOK
+}
+
+model Integration {
+  id              String          @id @default(uuid())
+  workspaceId     String
+  name            String
+  kind            IntegrationKind
+  config          Json            // non-secret config
+  credentialsEnc  String?         // AES-256-GCM ciphertext (hex)
+  enabled         Boolean         @default(true)
+  lastTestedAt    DateTime?
+  lastTestStatus  String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  deletedAt       DateTime?
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([kind])
+}
+
+// ──────────────────────────────────────────────────────────────
+// Audit
+// ──────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  userId        String?
+  workspaceId   String?
+  action        String   // e.g. "document.upload"
+  resourceType  String?
+  resourceId    String?
+  metadata      Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action])
+}

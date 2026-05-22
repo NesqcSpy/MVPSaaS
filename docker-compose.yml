@@ -1,0 +1,103 @@
+version: "3.9"
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dataclean-postgres
+    <<: *restart-policy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dataclean}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dataclean_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-dataclean}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dataclean}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: dataclean-redis
+    <<: *restart-policy
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: dataclean-backend
+    <<: *restart-policy
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-dataclean}:${POSTGRES_PASSWORD:-dataclean_dev}@postgres:5432/${POSTGRES_DB:-dataclean}?schema=public
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - backend-uploads:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: dataclean-frontend
+    <<: *restart-policy
+    env_file:
+      - ./frontend/.env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-4000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: dataclean-nginx
+    <<: *restart-policy
+    ports:
+      - "8080:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  postgres-data:
+  redis-data:
+  backend-uploads:
+
+networks:
+  default:
+    name: dataclean-network
